@@ -1,0 +1,167 @@
+version: '3.8'
+
+services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:7.0
+    container_name: cartora-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_DATABASE}
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - cartora-network
+
+  # Redis (for Celery)
+  redis:
+    image: redis:7-alpine
+    container_name: cartora-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - cartora-network
+
+  # Node.js Backend
+  backend-node:
+    build:
+      context: ./backend-node
+      dockerfile: Dockerfile
+    container_name: cartora-backend-node
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV}
+      PORT: ${NODE_PORT}
+      MONGO_URI: ${MONGO_URI}
+      JWT_SECRET: ${JWT_SECRET}
+      REDIS_URL: ${REDIS_URL}
+    ports:
+      - "${NODE_PORT}:${NODE_PORT}"
+    volumes:
+      - ./backend-node:/app
+      - /app/node_modules
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - cartora-network
+    command: npm run dev
+
+  # Django Backend
+  backend-django:
+    build:
+      context: ./backend-django
+      dockerfile: Dockerfile
+    container_name: cartora-backend-django
+    restart: unless-stopped
+    environment:
+      DJANGO_ENV: ${DJANGO_ENV}
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
+      DJANGO_DEBUG: ${DJANGO_DEBUG}
+      MONGO_URI: ${MONGO_URI}
+      REDIS_URL: ${REDIS_URL}
+    ports:
+      - "${DJANGO_PORT}:${DJANGO_PORT}"
+    volumes:
+      - ./backend-django:/app
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - cartora-network
+    command: python manage.py runserver 0.0.0.0:8000
+
+  # Celery Worker (for Django background jobs)
+  celery-worker:
+    build:
+      context: ./backend-django
+      dockerfile: Dockerfile
+    container_name: cartora-celery-worker
+    restart: unless-stopped
+    environment:
+      DJANGO_ENV: ${DJANGO_ENV}
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
+      MONGO_URI: ${MONGO_URI}
+      REDIS_URL: ${REDIS_URL}
+    volumes:
+      - ./backend-django:/app
+    depends_on:
+      - mongodb
+      - redis
+      - backend-django
+    networks:
+      - cartora-network
+    command: celery -A cartora_admin worker --loglevel=info
+
+  # Celery Beat (for scheduled tasks)
+  celery-beat:
+    build:
+      context: ./backend-django
+      dockerfile: Dockerfile
+    container_name: cartora-celery-beat
+    restart: unless-stopped
+    environment:
+      DJANGO_ENV: ${DJANGO_ENV}
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
+      MONGO_URI: ${MONGO_URI}
+      REDIS_URL: ${REDIS_URL}
+    volumes:
+      - ./backend-django:/app
+    depends_on:
+      - mongodb
+      - redis
+      - backend-django
+    networks:
+      - cartora-network
+    command: celery -A cartora_admin beat --loglevel=info
+
+  # Frontend (React + Vite)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    container_name: cartora-frontend
+    restart: unless-stopped
+    environment:
+      VITE_API_URL: ${VITE_API_URL}
+      VITE_DJANGO_URL: ${VITE_DJANGO_URL}
+    ports:
+      - "${VITE_PORT}:${VITE_PORT}"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - cartora-network
+    command: npm run dev -- --host
+
+  # Nginx Reverse Proxy
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: cartora-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - frontend
+      - backend-node
+      - backend-django
+    networks:
+      - cartora-network
+
+networks:
+  cartora-network:
+    driver: bridge
+
+volumes:
+  mongo-data:
+  redis-data:
