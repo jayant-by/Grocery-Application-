@@ -64,16 +64,19 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'cartora_admin.wsgi.application'
 
-# Database - MongoDB via djongo
+# Database - SQLite (for development)
+# Note: djongo was removed due to Python 3.14 incompatibility
+# To use MongoDB, you'll need to use pymongo directly in your views/models
 DATABASES = {
     'default': {
-        'ENGINE': 'djongo',
-        'NAME': os.getenv('MONGO_DATABASE', 'cartora'),
-        'CLIENT': {
-            'host': os.getenv('MONGO_URI', 'mongodb://localhost:27017/cartora'),
-        }
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
     }
 }
+
+# MongoDB connection (if needed for direct pymongo usage)
+MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017/')
+MONGO_DATABASE = os.getenv('MONGO_DATABASE', 'cartora')
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
